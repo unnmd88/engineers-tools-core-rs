@@ -1,5 +1,6 @@
 use traffic_core::conditions::Parser;
 use traffic_core::conditions::gen_condition::generate_condition;
+use traffic_core::converters::gen_scn_from_chars;
 
 fn view_flow_and_ast() {
 
@@ -39,8 +40,19 @@ fn simple_gen_condotion() {
 }
 
 
+fn covert_scn() {
+    let test_cases = vec!["   CO455 4", "         CJ4", "   ", "CC C 4 23      "];
+    for test_case in test_cases {
+        println!("Это сконверченный ascii: {}", gen_scn_from_chars(test_case));
+    }
+
+
+}
+
+
 fn main() {
 
-    view_flow_and_ast();
+    // view_flow_and_ast();
+    covert_scn();
 
 }
