@@ -32,6 +32,7 @@ fn view_flow_and_ast() {
 
 
 fn simple_gen_condotion() {
+    
 
     let test_cases = vec!["1|3", "1|3, 24", "1&3, 14"];
     for input in test_cases {
@@ -41,7 +42,7 @@ fn simple_gen_condotion() {
 
 
 fn covert_scn() {
-    let test_cases = vec!["   CO455 4", "         CJ4", "   ", "CC C 4 23      "];
+    let test_cases = vec!["CO4554", "C1111",];
     for test_case in test_cases {
         println!("Это сконверченный ascii: {}", gen_scn_from_chars(test_case));
     }
@@ -51,6 +52,7 @@ fn covert_scn() {
 
 
 fn main() {
+
 
     // view_flow_and_ast();
     covert_scn();
