@@ -16,6 +16,8 @@ struct ConvertedString {
 
 
 pub fn gen_scn_from_chars(string: &str) -> String {
+    // Функция генерирует строку ASCII с префиксом на основе входящей.
+    // Пример: gen_scn_from_chars("CO4554") => ".1.6.67.79.52.53.53.52"
 
 
     // Если нужно просто получить вектор чисел
