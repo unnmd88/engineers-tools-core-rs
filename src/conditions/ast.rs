@@ -1,127 +1,68 @@
-//! AST (абстрактное синтаксическое дерево) для логических условий
+//! AST (Abstract Syntax Tree) для DDR-выражений
+//!
+//! Этот модуль содержит структуры данных, которые представляют
+//! разобранное выражение пользователя.
 
-/// Выражение условия
+/// Основное выражение.
+///
+/// Выражением может быть:
+/// - Простой диапазон: "or 1-3", "and 4-6", "1-3" (OR по умолчанию)
+/// - Комбинация выражений: "(or 1-3) and (or 4-6)"
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    /// Просто число: 1, 2, 3...
-    Number(u32),
-
-    /// OR операция: A | B | C
-    Or(Vec<Expr>),
-
-    /// AND операция: A & B & C
-    And(Vec<Expr>),
+    /// Диапазон DDR номеров (самый простой случай)
+    Range(Range),
+    
+    /// Бинарная операция: левое выражение, оператор, правое выражение
+    Binary {
+        op: BinaryOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
 }
 
-impl Expr {
-    /// Создать число
-    pub fn number(n: u32) -> Self {
-        Expr::Number(n)
-    }
-
-    /// Создать OR выражение (уплощает вложенные OR)
-    pub fn or(children: Vec<Expr>) -> Self {
-        // Собираем все вложенные OR в один вектор
-        let mut flat = Vec::new();
-        for child in children {
-            match child {
-                Expr::Or(mut subs) => flat.append(&mut subs),
-                other => flat.push(other),
-            }
-        }
-
-        if flat.len() == 1 {
-            flat.into_iter().next().unwrap()
-        } else {
-            Expr::Or(flat)
-        }
-    }
-
-    /// Создать AND выражение (уплощает вложенные AND)
-    pub fn and(children: Vec<Expr>) -> Self {
-        let mut flat = Vec::new();
-        for child in children {
-            match child {
-                Expr::And(mut subs) => flat.append(&mut subs),
-                other => flat.push(other),
-            }
-        }
-
-        if flat.len() == 1 {
-            flat.into_iter().next().unwrap()
-        } else {
-            Expr::And(flat)
-        }
-    }
-
-    /// Преобразовать в формат ddr(D...)
-    pub fn to_ddr_string(&self) -> String {
-        match self {
-            Expr::Number(n) => format!("ddr(D{})", n),
-            Expr::Or(children) => {
-                let inner: Vec<String> = children.iter()
-                    .map(|c| c.to_ddr_string())
-                    .collect();
-                format!("({})", inner.join(" or "))
-            }
-            Expr::And(children) => {
-                let inner: Vec<String> = children.iter()
-                    .map(|c| c.to_ddr_string())
-                    .collect();
-                format!("({})", inner.join(" and "))
-            }
-        }
-    }
+/// Диапазон DDR номеров.
+///
+/// Хранит начальный и конечный номер, а также оператор внутри диапазона.
+/// Пример: "and 1-3" → Range { start: 1, end: 3, operator: RangeOp::And }
+#[derive(Debug, Clone, PartialEq)]
+pub struct Range {
+    pub start: u32,
+    pub end: u32,
+    pub operator: RangeOp,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Оператор внутри диапазона.
+///
+/// Определяет, как соединяются элементы внутри одного диапазона:
+/// - Or: ddr(D1) or ddr(D2) or ddr(D3)  (по умолчанию)
+/// - And: ddr(D1) and ddr(D2) and ddr(D3)
+#[derive(Debug, Clone, PartialEq)]
+pub enum RangeOp {
+    Or,  // значение по умолчанию, если оператор не указан
+    And,
+}
 
-    #[test]
-    fn test_create_number() {
-        let expr = Expr::number(5);
-        assert_eq!(expr, Expr::Number(5));
-        assert_eq!(expr.to_ddr_string(), "ddr(D5)");
-    }
+/// Оператор между выражениями.
+///
+/// Используется для соединения целых выражений:
+/// - (or 1-3) and (or 4-6) → BinaryOp::And
+/// - (or 1-3) or (and 4-6)  → BinaryOp::Or
+#[derive(Debug, Clone, PartialEq)]
+pub enum BinaryOp {
+    And,
+    Or,
+}
 
-    #[test]
-    fn test_create_or() {
-        let expr = Expr::or(vec![
-            Expr::number(1),
-            Expr::number(3),
-        ]);
-        
-        match expr {
-            Expr::Or(children) => {
-                assert_eq!(children.len(), 2);
-            }
-            _ => panic!("Expected Or expression"),
-        }
-        
-        assert_eq!(expr.to_ddr_string(), "(ddr(D1) or ddr(D3))");
-    }
-
-    #[test]
-    fn test_create_and() {
-        let expr = Expr::and(vec![
-            Expr::number(1),
-            Expr::number(3),
-        ]);
-        
-        assert_eq!(expr.to_ddr_string(), "(ddr(D1) and ddr(D3))");
-    }
-
-    #[test]
-    fn test_nested() {
-        let expr = Expr::or(vec![
-            Expr::number(1),
-            Expr::and(vec![
-                Expr::number(2),
-                Expr::number(3),
-            ]),
-        ]);
-        
-        assert_eq!(expr.to_ddr_string(), "(ddr(D1) or (ddr(D2) and ddr(D3)))");
+/// Конструкторы для удобства создания структур.
+impl Range {
+    /// Создаёт новый диапазон.
+    ///
+    /// # Пример
+    /// ```
+    /// let range = Range::new(1, 3, RangeOp::Or);
+    /// ```
+    pub fn new(start: u32, end: u32, operator: RangeOp) -> Self {
+        Self { start, end, operator }
     }
 }

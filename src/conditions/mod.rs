@@ -1,6 +1,30 @@
-mod parser;
-mod ast;
-pub mod gen_condition;  // теперь публичный
+//! Модуль для работы с DDR-выражениями
+//!
+//! Этот модуль позволяет парсить строки вида "1-3", "or 1-3", 
+//! "(or 1-3) and (or 4-6)" и превращать их в структуры данных,
+//! а также генерировать обратно строки в формате DDR.
+//!
+//! # Пример
+//! ```
+//! use ddr_conditions::{parse_ddr_expression, to_ddr_string};
+//!
+//! let expr = parse_ddr_expression("(or 1-3) and (or 4-6)").unwrap();
+//! let result = to_ddr_string(&expr);
+//! println!("{}", result); // (ddr(D1) or ddr(D2) or ddr(D3)) and (ddr(D4) or ddr(D5) or ddr(D6))
+//! ```
+//! 
 
-pub use parser::Parser;
-pub use gen_condition::generate_condition;
+
+// Объявляем подмодули (файлы в той же папке)
+mod ast;        // ast.rs — структуры данных
+mod parser;     // parser.rs — разбор строки в AST
+mod generator;  // generator.rs — преобразование AST в строку
+mod error;      // error.rs — типы ошибок
+
+// Реэкспортируем самое важное наружу
+// Теперь пользователь сможет писать:
+// use ddr_conditions::{parse_ddr_expression, Expr, Range, ParseError};
+pub use ast::{Expr, Range, RangeOp, BinaryOp};
+pub use parser::parse_ddr_expression;
+pub use generator::{to_ddr_string, GenerateOptions};
+pub use error::ParseError;
