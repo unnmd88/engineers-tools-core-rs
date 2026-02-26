@@ -19,6 +19,10 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    WithMr { 
+        ddr_expr: Box<Expr>, 
+        mr: u16,
+     },
 }
 
 /// Диапазон DDR номеров.
@@ -27,8 +31,8 @@ pub enum Expr {
 /// Пример: "and 1-3" → Range { start: 1, end: 3, operator: RangeOp::And }
 #[derive(Debug, Clone, PartialEq)]
 pub struct Range {
-    pub start: u32,
-    pub end: u32,
+    pub start: u16,
+    pub end: u16,
     pub operator: RangeOp,
 }
 
@@ -62,7 +66,7 @@ impl Range {
     /// ```
     /// let range = Range::new(1, 3, RangeOp::Or);
     /// ```
-    pub fn new(start: u32, end: u32, operator: RangeOp) -> Self {
+    pub fn new(start: u16, end: u16, operator: RangeOp) -> Self {
         Self { start, end, operator }
     }
 }

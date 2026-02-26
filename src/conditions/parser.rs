@@ -40,38 +40,142 @@ use crate::conditions::error::ParseError;
 pub fn parse_ddr_expression(input: &str) -> Result<Expr, ParseError> {
     let input = input.trim();
     
-    match expr_parser().parse(input) {
-        Ok(("", expr)) => Ok(expr),
-        Ok((remaining, _)) => Err(ParseError::ExtraInput(remaining.to_string())),
+    if input.is_empty() {
+        return Err(ParseError::MissingOperand("выражение".to_string()));
+    }
+    
+    // Предварительные проверки
+    if let Some(op) = check_trailing_operator(input) {
+        return Err(ParseError::MissingOperand(op));
+    }
+    
+    check_paren_balance(input)?;
+    check_empty_parens(input)?;
+    
+    // Используем новый парсер с поддержкой MR
+    match expr_with_mr_parser().parse(input) {
+        Ok(("", expr)) => {
+            // Всё выражение успешно распарсилось
+            if let Expr::Range(range) = &expr {
+                if range.start > range.end {
+                    return Err(ParseError::RangeStartGreaterThanEnd(range.start, range.end));
+                }
+            }
+            Ok(expr)
+        }
+        Ok((remaining, _)) => {
+            // Распарсилось, но остались символы
+            let remaining = remaining.trim();
+            if remaining.is_empty() {
+                unreachable!() // этого не должно случиться
+            } else if remaining.starts_with(')') {
+                Err(ParseError::ExtraClosingParen)
+            } else {
+                Err(ParseError::ExtraInput(remaining.to_string()))
+            }
+        }
         Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
-            // Попробуем сделать ошибку понятнее
-            let input_preview = if input.len() > 20 {
-                format!("{}...", &input[..20])
+            // Ошибка парсинга
+            let input_preview = if input.len() > 30 {
+                format!("{}...", &input[..30])
             } else {
                 input.to_string()
             };
             
             match e.code {
                 nom::error::ErrorKind::Digit => {
-                    Err(ParseError::ExpectedNumber(format!("в '{}'", input_preview)))
+                    Err(ParseError::ExpectedNumber(input_preview))
                 }
                 nom::error::ErrorKind::Char => {
-                    Err(ParseError::UnexpectedChar(
-                        input.chars().next().unwrap_or('?'), 
-                        0
-                    ))
+                    if !input.contains('-') {
+                        Err(ParseError::InvalidRange)
+                    } else {
+                        let first_char = input.chars().next().unwrap_or('?');
+                        Err(ParseError::UnexpectedChar(first_char, 0))
+                    }
                 }
                 nom::error::ErrorKind::Tag => {
-                    Err(ParseError::UnknownOperator(input_preview))
+                    if input.starts_with('(') && !input.contains(')') {
+                        Err(ParseError::UnclosedParen)
+                    } else {
+                        Err(ParseError::UnknownOperator(input_preview))
+                    }
                 }
                 _ => {
-                    eprintln!("Ошибка парсинга: {:?}", e);
-                    Err(ParseError::InternalError)
+                    eprintln!("[DEBUG] Ошибка парсинга: {:?} для input: {}", e, input);
+                    Err(ParseError::InternalError(format!("{:?}", e)))
                 }
             }
         }
-        Err(_) => Err(ParseError::InternalError),
+        Err(e) => {
+            eprintln!("[DEBUG] Неожиданная ошибка: {:?}", e);
+            Err(ParseError::InternalError(format!("{:?}", e)))
+        }
     }
+}
+
+/// Проверка на висящий оператор в конце
+fn check_trailing_operator(input: &str) -> Option<String> {
+    let trimmed = input.trim_end(); // убираем пробелы только справа
+    
+    // Проверяем все варианты операторов (с пробелом и без)
+    let patterns = [
+        ("and", "and"), ("and ", "and"),
+        ("or", "or"), ("or ", "or"),
+        ("&", "&"), ("& ", "&"),
+        ("|", "|"), ("| ", "|"),
+    ];
+    
+    for (pattern, op) in patterns {
+        if trimmed.ends_with(pattern) {
+            // Проверяем, что перед оператором есть валидное выражение
+            let before_op = &trimmed[..trimmed.len() - pattern.len()].trim();
+            
+            // Если перед оператором что-то есть и это не пустота
+            if !before_op.is_empty() {
+                // Проверяем последний символ
+                if let Some(last_char) = before_op.chars().last() {
+                    // Если последний символ - цифра или скобка, значит оператор висящий
+                    if last_char.is_digit(10) || last_char == ')' {
+                        return Some(op.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Проверка баланса скобок
+fn check_paren_balance(input: &str) -> Result<(), ParseError> {
+    let mut balance = 0;
+    
+    for c in input.chars() {
+        match c {
+            '(' => balance += 1,
+            ')' => {
+                if balance == 0 {
+                    return Err(ParseError::ExtraClosingParen);
+                }
+                balance -= 1;
+            }
+            _ => {}
+        }
+    }
+    
+    if balance > 0 {
+        Err(ParseError::UnclosedParen)
+    } else {
+        Ok(())
+    }
+}
+
+/// Проверка на пустые скобки
+fn check_empty_parens(input: &str) -> Result<(), ParseError> {
+    if input.contains("()") {
+        return Err(ParseError::EmptyParens);
+    }
+    Ok(())
 }
 
 /// Парсер числа
@@ -103,7 +207,11 @@ fn range_parser<'a>() -> impl Parser<&'a str, Output = Range, Error = Error<&'a 
         let (input, _) = ws(char('-')).parse(input)?;
         let (input, end) = ws(number_parser()).parse(input)?;
         
-        Ok((input, Range::new(start, end, op.unwrap_or(RangeOp::Or))))
+        // Конвертируем u32 в u16
+        let start_u16 = start as u16;
+        let end_u16 = end as u16;
+        
+        Ok((input, Range::new(start_u16, end_u16, op.unwrap_or(RangeOp::Or))))
     }
 }
 
@@ -134,7 +242,7 @@ fn atom_parser<'a>() -> impl Parser<&'a str, Output = Expr, Error = Error<&'a st
     ))
 }
 
-/// Парсер выражения (с левой ассоциативностью)
+/// Парсер выражения (без MR)
 fn expr_parser<'a>() -> impl Parser<&'a str, Output = Expr, Error = Error<&'a str>> {
     move |mut input: &'a str| {
         let (rest, mut left) = atom_parser().parse(input)?;
@@ -157,6 +265,45 @@ fn expr_parser<'a>() -> impl Parser<&'a str, Output = Expr, Error = Error<&'a st
         }
         
         Ok((input, left))
+    }
+}
+
+/// Парсер для MR: ", число"
+fn mr_parser<'a>() -> impl Parser<&'a str, Output = u16, Error = Error<&'a str>> {
+    move |input: &'a str| {
+        let (input, _) = char(',')(input)?;  // просто запятая, без ws
+        let (input, num) = ws(number_parser()).parse(input)?;  // число с пробелами
+        let num_u16 = num as u16;
+        
+        Ok((input, num_u16))
+    }
+}
+
+/// Парсер с поддержкой MR
+fn expr_with_mr_parser<'a>() -> impl Parser<&'a str, Output = Expr, Error = Error<&'a str>> {
+    move |input: &'a str| {
+        // Сначала парсим DDR-выражение
+        match expr_parser().parse(input) {
+            Ok((rest, ddr_expr)) => {
+                // Пробуем найти MR
+                match mr_parser().parse(rest) {
+                    Ok((final_rest, mr_num)) => {
+                        // Нашли MR
+                        let expr = Expr::WithMr {
+                            ddr_expr: Box::new(ddr_expr),
+                            mr: mr_num,
+                        };
+                        Ok((final_rest, expr))
+                    }
+                    Err(nom::Err::Error(_)) | Err(nom::Err::Failure(_)) => {
+                        // MR нет, возвращаем просто DDR
+                        Ok((rest, ddr_expr))
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -236,6 +383,123 @@ mod tests {
                 }
             }
             _ => panic!("Expected OR at top level"),
+        }
+    }
+
+    #[test]
+    fn test_missing_operand() {
+        assert!(matches!(
+            parse_ddr_expression("1-3 and"),
+            Err(ParseError::MissingOperand(op)) if op == "and"
+        ));
+        
+        assert!(matches!(
+            parse_ddr_expression("(1-3) or"),
+            Err(ParseError::MissingOperand(op)) if op == "or"
+        ));
+        
+        assert!(matches!(
+            parse_ddr_expression("|"),
+            Err(ParseError::MissingOperand(op)) if op == "|"
+        ));
+    }
+    
+    #[test]
+    fn test_unclosed_paren() {
+        assert!(matches!(
+            parse_ddr_expression("(1-3"),
+            Err(ParseError::UnclosedParen)
+        ));
+        
+        assert!(matches!(
+            parse_ddr_expression("((1-3) and (4-6)"),
+            Err(ParseError::UnclosedParen)
+        ));
+    }
+    
+    #[test]
+    fn test_extra_closing_paren() {
+        assert!(matches!(
+            parse_ddr_expression("(1-3))"),
+            Err(ParseError::ExtraClosingParen)
+        ));
+    }
+    
+    #[test]
+    fn test_empty_parens() {
+        assert!(matches!(
+            parse_ddr_expression("()"),
+            Err(ParseError::EmptyParens)
+        ));
+    }
+    
+    #[test]
+    fn test_invalid_range() {
+        assert!(matches!(
+            parse_ddr_expression("1-"),
+            Err(ParseError::InvalidRange)
+        ));
+    }
+    
+    #[test]
+    fn test_range_start_greater_than_end() {
+        assert!(matches!(
+            parse_ddr_expression("5-3"),
+            Err(ParseError::RangeStartGreaterThanEnd(5, 3))
+        ));
+    }
+
+    // Новые тесты для MR
+    #[test]
+    fn test_mr_simple() {
+        let expr = parse_ddr_expression("1-3, 12").unwrap();
+        match expr {
+            Expr::WithMr { ddr_expr, mr } => {
+                assert_eq!(mr, 12);
+                match *ddr_expr {
+                    Expr::Range(range) => {
+                        assert_eq!(range.start, 1);
+                        assert_eq!(range.end, 3);
+                    }
+                    _ => panic!("Expected range"),
+                }
+            }
+            _ => panic!("Expected WithMr"),
+        }
+    }
+
+    #[test]
+    fn test_mr_with_spaces() {
+        let expr = parse_ddr_expression("1-3,12").unwrap();
+        match expr {
+            Expr::WithMr { ddr_expr, mr } => {
+                assert_eq!(mr, 12);
+                match *ddr_expr {
+                    Expr::Range(range) => {
+                        assert_eq!(range.start, 1);
+                        assert_eq!(range.end, 3);
+                    }
+                    _ => panic!("Expected range"),
+                }
+            }
+            _ => panic!("Expected WithMr"),
+        }
+    }
+
+    #[test]
+    fn test_complex_with_mr() {
+        let expr = parse_ddr_expression("(1-3) and (7-8), 4").unwrap();
+        match expr {
+            Expr::WithMr { ddr_expr, mr } => {
+                assert_eq!(mr, 4);
+                match *ddr_expr {
+                    Expr::Binary { op, left, right } => {
+                        assert_eq!(op, BinaryOp::And);
+                    }
+                    _ => panic!("Expected binary expression"),
+                }
+            }
+            _ => panic!("Expected WithMr"),
         }
     }
 }

@@ -52,7 +52,14 @@ pub fn to_ddr_string_with_options(expr: &Expr, options: &GenerateOptions) -> Str
                 },
                 to_ddr_string_with_options(right, options)
             )
-        }
+        },
+        Expr::WithMr { ddr_expr, mr } => {
+            format!(
+                "({}) and mr(G{})",
+                to_ddr_string_with_options(ddr_expr, options),
+                mr
+            )       
+        },
     }
 }
 
